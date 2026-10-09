@@ -456,48 +456,114 @@
             updateStatus('error', ' MIDI access denied or not supported.');
         }
 
-        async function initMIDI() {
-            updateStatus('connecting', ' Requesting MIDI access...');
+        // --- NEW DIRECT BLUETOOTH GATT LOGIC ---
+        const BLE_MIDI_SERVICE = '03b80e5a-ede8-4b33-a751-6ce34ec4c700';
+        const BLE_MIDI_CHAR = '7772e5db-3868-4112-a1a9-f2669d106bf3';
+        let bleRunningStatus = null;
+
+        function parseBLEMIDI(event) {
+            const data = new Uint8Array(event.target.value.buffer);
+            // data[0] is the Header (Timestamp High). Skip it.
+            let i = 1; 
             
-            // Web MIDI API requires HTTPS
+            while (i < data.length) {
+                let byte = data[i];
+                
+                // Check if this byte is a Timestamp (MSB is 1)
+                if ((byte & 0x80) !== 0) {
+                    // Is the next byte a Status byte? (also MSB = 1)
+                    if (i + 1 < data.length && (data[i+1] & 0x80) !== 0) {
+                        bleRunningStatus = data[i+1]; // Save Status (e.g., Note On)
+                        i += 2; // Move past Timestamp and Status
+                    } else {
+                        // Next byte is Data. This implies "Running Status" (reusing the last status)
+                        i++; // Move past Timestamp
+                    }
+                    
+                    // Now parse the Data based on the active Status
+                    if (bleRunningStatus) {
+                        let statusType = bleRunningStatus & 0xF0;
+                        if (statusType === 0x90) { // 0x90 is Note On
+                            if (i + 1 < data.length) {
+                                let note = data[i];
+                                let vel = data[i+1];
+                                // Process the note if velocity is greater than 0
+                                if (note < 128 && vel < 128 && vel > 0) {
+                                    handleNotePressed(note);
+                                }
+                                i += 2;
+                            } else { break; }
+                        } else if (statusType === 0x80) { // Note Off
+                            i += 2; 
+                        } else if (statusType === 0xB0 || statusType === 0xE0) { // Control Change / Pitch Bend
+                            i += 2;
+                        } else if (statusType === 0xC0 || statusType === 0xD0) { // Program Change
+                            i += 1;
+                        } else {
+                            i++; // Fallback for unknown status
+                        }
+                    }
+                } else {
+                    i++; // Unexpected stray data byte
+                }
+            }
+        }
+
+        async function initMIDI() {
+            updateStatus('connecting', ' Connecting...');
+            
             if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
                 updateStatus('error', ' Error: Web MIDI requires an HTTPS connection.');
                 return;
             }
 
+            // 1. Try Direct Bluetooth GATT Connection (Fixes Android/Roland bug)
+            if (navigator.bluetooth) {
+                try {
+                    updateStatus('connecting', ' Select your Roland from the popup...');
+                    const device = await navigator.bluetooth.requestDevice({
+                        acceptAllDevices: true,
+                        optionalServices: [BLE_MIDI_SERVICE]
+                    });
+                    
+                    updateStatus('connecting', ' Connecting to GATT server...');
+                    const server = await device.gatt.connect();
+                    
+                    updateStatus('connecting', ' Finding MIDI service...');
+                    const service = await server.getPrimaryService(BLE_MIDI_SERVICE);
+                    
+                    updateStatus('connecting', ' Enabling MIDI data...');
+                    const characteristic = await service.getCharacteristic(BLE_MIDI_CHAR);
+                    
+                    await characteristic.startNotifications();
+                    characteristic.addEventListener('characteristicvaluechanged', parseBLEMIDI);
+                    
+                    device.addEventListener('gattserverdisconnected', () => {
+                        updateStatus('error', ' Piano disconnected');
+                    });
+                    
+                    updateStatus('connected', ' Connected to Bluetooth Piano!');
+                    generateNewNote();
+                    return; // Success! Exit function early.
+                    
+                } catch (btError) {
+                    console.log("Web Bluetooth GATT failed or cancelled:", btError);
+                    updateStatus('connecting', ' Falling back to standard USB MIDI...');
+                }
+            }
+
+            // 2. Fallback to Standard Web MIDI (For USB Cables or Desktop users)
             if (navigator.requestMIDIAccess) {
                 try {
-                    // Try to get standard MIDI access first (for USB connections)
                     const midiAccess = await navigator.requestMIDIAccess({ sysex: false });
-                    
-                    // If we have standard inputs, use them
                     if (midiAccess.inputs.size > 0) {
                         onMIDISuccess(midiAccess);
-                        return;
-                    }
-
-                    // If no standard inputs, and browser supports Bluetooth Web API, try explicit BT pairing
-                    if (navigator.bluetooth) {
-                        updateStatus('connecting', ' Select your piano from the browser popup...');
-                        try {
-                            const device = await navigator.bluetooth.requestDevice({
-                                filters: [{ services: ['03b80e5a-ede8-4b33-a751-6ce34ec4c700'] }] // Standard BLE MIDI Service UUID
-                            });
-                            
-                            // Once connected via Bluetooth API, Web MIDI should now see it. 
-                            // Re-request MIDI access to grab the newly paired device.
-                            const btMidiAccess = await navigator.requestMIDIAccess({ sysex: false });
-                            onMIDISuccess(btMidiAccess);
-
-                        } catch (btError) {
-                            console.error("Bluetooth pairing cancelled or failed:", btError);
-                            updateStatus('error', ' Bluetooth pairing cancelled. Try connecting via USB cable if BT fails.');
-                        }
                     } else {
-                        // Fallback if no specific BT API, just run standard success which will show 0 devices found
-                        onMIDISuccess(midiAccess);
+                        updateStatus('error', ' No MIDI devices found. Check cable or Bluetooth.');
+                        buildVirtualKeyboard();
+                        virtualKeyboard.classList.remove('hidden');
+                        virtualKeyboard.classList.add('flex');
                     }
-
                 } catch (error) {
                     onMIDIFailure(error);
                 }
