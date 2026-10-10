@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Roland FP-30X Sight-Reading Flashcards</title>
-  <meta name="description" content="Interactive sight-reading flashcard web application for the Roland FP-30X digital piano using Web MIDI API." />
+  <meta name="description" content="Interactive sight-reading flashcard web application for the Roland FP-30X digital piano using Web MIDI and Web Bluetooth." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -17,137 +17,150 @@
       <div class="brand-group">
         <div class="brand-mark" aria-hidden="true">&#9839;</div>
         <div class="brand-titles">
-          <h1>Roland FP-30X Sight-Reading Trainer</h1>
-          <p>Whole-note flashcards • Staff + 0–4 Ledger Lines • Exact Octave MIDI Matching</p>
+          <h1>FP-30X Sight-Reading</h1>
+          <p class="brand-subtitle">Whole-note flashcards • 0–4 Ledger Lines • Exact Octave</p>
         </div>
       </div>
 
       <div class="midi-bar">
         <div id="midi-status-badge" class="midi-status-badge" data-status="disconnected">
           <span id="midi-dot" class="midi-dot"></span>
-          <span id="midi-status-text">Initializing Web MIDI…</span>
+          <span id="midi-status-text">Waiting for MIDI…</span>
         </div>
 
         <select id="midi-device-select" class="midi-select" aria-label="Select MIDI Input Device">
-          <option value="none">Scanning MIDI ports…</option>
+          <option value="none">No MIDI devices</option>
         </select>
 
-        <button id="btn-ble-midi" type="button" class="btn-console" title="Connect directly to Roland FP-30X Bluetooth LE MIDI from Chrome">
+        <button id="btn-ble-midi" type="button" class="btn-console btn-ble-primary" title="Connect directly to Roland FP-30X Bluetooth LE MIDI">
           Pair Bluetooth MIDI
         </button>
 
-        <button id="btn-rescan-midi" type="button" class="btn-console">
-          Rescan MIDI
+        <button id="btn-rescan-midi" type="button" class="btn-console" title="Rescan USB / OS MIDI ports">
+          Rescan
         </button>
 
-        <button id="btn-download-html" type="button" class="btn-console" title="Download a single self-contained HTML file to open on any laptop">
-          &#8595; Download .html
+        <button id="btn-download-html" type="button" class="btn-console btn-download" title="Download a single self-contained HTML file">
+          &#8595; .html
         </button>
       </div>
     </header>
 
-    <!-- Practice Settings & Session Statistics -->
-    <section class="controls-panel" aria-label="Practice Configuration and Session Statistics">
-      <div class="settings-group">
-        <div class="control-block">
-          <span class="control-label">Clef</span>
-          <div class="segmented-control" role="group" aria-label="Clef Selection">
-            <button id="clef-btn-treble" type="button" class="segment-btn" data-clef="treble" aria-pressed="false">
-              Treble
-            </button>
-            <button id="clef-btn-bass" type="button" class="segment-btn" data-clef="bass" aria-pressed="false">
-              Bass
-            </button>
-            <button id="clef-btn-both" type="button" class="segment-btn active" data-clef="both" aria-pressed="true">
-              Both (Random)
-            </button>
+    <!-- Main Responsive Workspace (2-column in phone landscape, stacked in portrait/tablet) -->
+    <div class="workspace-layout">
+      <!-- Controls & Session Statistics Panel -->
+      <aside class="controls-panel" aria-label="Practice Configuration and Session Statistics">
+        <div class="settings-group">
+          <div class="control-block control-block-clef">
+            <span class="control-label">Clef</span>
+            <div class="segmented-control" role="group" aria-label="Clef Selection">
+              <button id="clef-btn-treble" type="button" class="segment-btn" data-clef="treble" aria-pressed="false">
+                Treble
+              </button>
+              <button id="clef-btn-bass" type="button" class="segment-btn" data-clef="bass" aria-pressed="false">
+                Bass
+              </button>
+              <button id="clef-btn-both" type="button" class="segment-btn active" data-clef="both" aria-pressed="true">
+                Both
+              </button>
+            </div>
+          </div>
+
+          <div class="control-row-secondary">
+            <div class="control-block">
+              <label class="control-label" for="select-ledger-lines">Ledger</label>
+              <select id="select-ledger-lines" class="ledger-select" aria-label="Number of Ledger Lines">
+                <option value="0">0 (Staff)</option>
+                <option value="1">1 Line</option>
+                <option value="2">2 Lines</option>
+                <option value="3" selected>3 Lines</option>
+                <option value="4">4 Lines</option>
+              </select>
+            </div>
+
+            <label class="checkbox-toggle" for="toggle-accidentals">
+              <input id="toggle-accidentals" type="checkbox" />
+              <span>Sharps &amp; Flats (&#9839;/&#9837;)</span>
+            </label>
           </div>
         </div>
 
-        <div class="control-block">
-          <label class="control-label" for="select-ledger-lines">Ledger Lines</label>
-          <select id="select-ledger-lines" class="ledger-select" aria-label="Number of Ledger Lines">
-            <option value="0">0 (Staff Only)</option>
-            <option value="1">1 Ledger Line</option>
-            <option value="2">2 Ledger Lines</option>
-            <option value="3" selected>3 Ledger Lines</option>
-            <option value="4">4 Ledger Lines</option>
-          </select>
-        </div>
-
-        <label class="checkbox-toggle" for="toggle-accidentals">
-          <input id="toggle-accidentals" type="checkbox" />
-          <span>Include Sharps &amp; Flats (&#9839; / &#9837;)</span>
-        </label>
-      </div>
-
-      <div class="stats-group">
-        <div class="stat-pill">
-          <span class="stat-label">Streak</span>
-          <span id="stat-streak" class="stat-value">0</span>
-          <span id="stat-best-streak" class="stat-sub">Best: 0</span>
-        </div>
-
-        <div class="stat-pill">
-          <span class="stat-label">Accuracy</span>
-          <span id="stat-accuracy" class="stat-value">—</span>
-          <span id="stat-attempts" class="stat-sub">0 / 0 keys</span>
-        </div>
-
-        <div class="stat-pill">
-          <span class="stat-label">Avg Time</span>
-          <span id="stat-avg-time" class="stat-value">—</span>
-          <span id="stat-last-time" class="stat-sub">Last: —</span>
-        </div>
-
-        <button id="btn-reset-stats" type="button" class="btn-secondary">
-          Reset Stats
-        </button>
-      </div>
-    </section>
-
-    <!-- Main Flashcard Sheet Music Stage -->
-    <main class="stage-grid">
-      <section id="flashcard-container" class="flashcard-container" aria-live="polite">
-        <div class="card-meta-row">
-          <div class="clef-indicator">
-            <span id="current-clef-label">Treble Clef (G)</span>
+        <div class="stats-group">
+          <div class="stat-pill">
+            <span class="stat-label">Streak</span>
+            <div class="stat-value-row">
+              <span id="stat-streak" class="stat-value">0</span>
+              <span id="stat-best-streak" class="stat-sub">Best: 0</span>
+            </div>
           </div>
-          <span id="current-range-tag" class="range-tag">F3 – E6 (3 ledger lines)</span>
-        </div>
 
-        <div class="staff-viewport">
-          <svg id="staff-svg" viewBox="0 0 680 320" role="img" aria-label="Musical staff flashcard showing a whole note"></svg>
-        </div>
-
-        <div id="feedback-banner" class="feedback-banner feedback-waiting">
-          <div class="feedback-main">
-            <span id="feedback-main-text">Play the note on your Roland FP-30X</span>
+          <div class="stat-pill">
+            <span class="stat-label">Accuracy</span>
+            <div class="stat-value-row">
+              <span id="stat-accuracy" class="stat-value">—</span>
+              <span id="stat-attempts" class="stat-sub">0/0</span>
+            </div>
           </div>
-          <span id="feedback-detail-text" class="feedback-detail"></span>
-        </div>
 
-        <div class="card-actions-row">
-          <button id="btn-skip-note" type="button" class="btn-secondary">
-            Skip / Next Note &rarr;
+          <div class="stat-pill">
+            <span class="stat-label">Avg Time</span>
+            <div class="stat-value-row">
+              <span id="stat-avg-time" class="stat-value">—</span>
+              <span id="stat-last-time" class="stat-sub">Last: —</span>
+            </div>
+          </div>
+
+          <button id="btn-reset-stats" type="button" class="btn-secondary btn-reset">
+            Reset
           </button>
         </div>
-      </section>
+      </aside>
 
-      <!-- 88-Key Roland FP-30X Visual Monitor & Clickable Fallback -->
-      <section class="piano-section" aria-label="88-Key Piano Monitor">
-        <div class="piano-header">
-          <div class="piano-title-group">
-            <span class="piano-title">Roland FP-30X 88-Key Monitor (A0 – C8)</span>
-            <span class="piano-subtitle">Amber underline marks the active clef’s note range • Click any key to test without MIDI</span>
+      <!-- Main Flashcard Sheet Music Stage -->
+      <main class="stage-grid">
+        <section id="flashcard-container" class="flashcard-container" aria-live="polite">
+          <div class="card-meta-row">
+            <div class="clef-indicator">
+              <span id="current-clef-label">Treble Clef (G)</span>
+            </div>
+            <div class="card-meta-right">
+              <span id="current-range-tag" class="range-tag">F3 – E6 (3 ledger lines)</span>
+              <button id="btn-skip-note" type="button" class="btn-skip-inline">
+                Skip &rarr;
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="piano-scroll-wrapper">
-          <div id="piano-keyboard" class="piano-keyboard"></div>
-        </div>
-      </section>
-    </main>
+          <div class="staff-viewport">
+            <svg id="staff-svg" viewBox="0 0 520 310" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Musical staff flashcard showing a whole note"></svg>
+          </div>
+
+          <div id="feedback-banner" class="feedback-banner feedback-waiting">
+            <div class="feedback-main">
+              <span id="feedback-main-text">Play the note on your Roland FP-30X</span>
+            </div>
+            <span id="feedback-detail-text" class="feedback-detail"></span>
+          </div>
+        </section>
+
+        <!-- 88-Key Roland FP-30X Visual Monitor & Clickable Fallback -->
+        <section id="piano-section" class="piano-section" aria-label="88-Key Piano Monitor">
+          <div class="piano-header">
+            <div class="piano-title-group">
+              <span class="piano-title">88-Key Monitor (A0–C8)</span>
+              <span class="piano-subtitle">Amber bar = active clef range • Tap keys to test</span>
+            </div>
+            <button id="btn-toggle-piano" type="button" class="btn-secondary btn-toggle-piano" aria-expanded="true">
+              Hide Keys
+            </button>
+          </div>
+
+          <div id="piano-scroll-wrapper" class="piano-scroll-wrapper">
+            <div id="piano-keyboard" class="piano-keyboard"></div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
   <script src="app.js"></script>

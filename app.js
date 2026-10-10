@@ -242,7 +242,7 @@ function nextFlashcard() {
   clearPianoKeyHighlights();
   updatePianoRangeIndicators();
   renderFlashcard();
-  setFeedbackBanner('waiting', 'Play the note on your Roland FP-30X (or click a piano key below)', '');
+  setFeedbackBanner('waiting', 'Play the note on your Roland FP-30X', '');
 }
 
 /**
@@ -258,12 +258,12 @@ function renderFlashcard(revealCorrect = false) {
   document.getElementById('current-clef-label').textContent = clefCfg.label;
   document.getElementById('current-range-tag').textContent = bounds.rangeDescription;
 
-  // Staff geometry constants (viewBox: 0 0 680 320)
-  const staffLeft = 70;
-  const staffRight = 610;
-  const baseLineY = 200; // Line 1 (bottom staff line, stepOffset = 0)
+  // Staff geometry constants (viewBox: 0 0 520 310)
+  const staffLeft = 36;
+  const staffRight = 484;
+  const baseLineY = 195; // Line 1 (bottom staff line, stepOffset = 0)
   const stepSize = 10;   // 10px per diatonic step (20px between staff lines)
-  const noteX = 370;     // Horizontal center for the whole note
+  const noteX = 276;     // Horizontal center for the whole note
 
   const stepToY = (step) => baseLineY - step * stepSize;
 
@@ -286,16 +286,16 @@ function renderFlashcard(revealCorrect = false) {
 
   // 3. Clef SVG symbol (Treble or Bass)
   if (card.clef === 'treble') {
-    parts.push(renderTrebleClefSVG(staffLeft + 26, baseLineY));
+    parts.push(renderTrebleClefSVG(staffLeft + 24, baseLineY));
   } else {
-    parts.push(renderBassClefSVG(staffLeft + 26, baseLineY));
+    parts.push(renderBassClefSVG(staffLeft + 22, baseLineY));
   }
 
   // 4. Optional ghost note if the user just pressed a wrong key within visible range (-9..17)
   if (state.wrongGhostNote && !revealCorrect) {
     const ghost = state.wrongGhostNote;
     if (ghost.stepOffset >= -9 && ghost.stepOffset <= 17) {
-      const ghostX = noteX + 95;
+      const ghostX = noteX + 86;
       const ghostY = stepToY(ghost.stepOffset);
       parts.push(renderLedgerLinesSVG(ghost.stepOffset, ghostX, stepToY, '#dc2626', 0.45));
       if (ghost.accidental) {
@@ -565,11 +565,11 @@ function updateStatsUI() {
 
   if (totalPresses === 0) {
     document.getElementById('stat-accuracy').textContent = '—';
-    document.getElementById('stat-attempts').textContent = '0 / 0 keys';
+    document.getElementById('stat-attempts').textContent = '0/0';
   } else {
     const pct = Math.round((correctPresses / totalPresses) * 100);
     document.getElementById('stat-accuracy').textContent = `${pct}%`;
-    document.getElementById('stat-attempts').textContent = `${correctPresses} / ${totalPresses} keys`;
+    document.getElementById('stat-attempts').textContent = `${correctPresses}/${totalPresses}`;
   }
 
   if (responseTimesMs.length === 0) {
@@ -695,12 +695,25 @@ function updatePianoRangeIndicators() {
     state.ledgerLines
   );
 
+  const inRangeEls = [];
   document.querySelectorAll('.white-key').forEach((el) => {
     const m = Number(el.dataset.midi);
     if (m >= minMidi && m <= maxMidi) {
       el.classList.add('key-in-range');
+      inRangeEls.push(el);
     }
   });
+
+  // Auto-scroll horizontal piano wrapper on phones/tablets so the active clef range is centered
+  const wrapper = document.getElementById('piano-scroll-wrapper');
+  if (wrapper && inRangeEls.length > 0 && wrapper.scrollWidth > wrapper.clientWidth) {
+    const firstEl = inRangeEls[0];
+    const lastEl = inRangeEls[inRangeEls.length - 1];
+    const rangeCenter =
+      (firstEl.offsetLeft + lastEl.offsetLeft + lastEl.offsetWidth) / 2;
+    const targetScroll = Math.max(0, rangeCenter - wrapper.clientWidth / 2);
+    wrapper.scrollLeft = targetScroll;
+  }
 }
 
 /**
@@ -844,19 +857,43 @@ async function connectBluetoothMIDI() {
 
   try {
     statusText.textContent = 'Select FP-30X MIDI in browser popup…';
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { services: [BLE_MIDI_SERVICE_UUID] },
-        { namePrefix: 'FP-30' },
-        { namePrefix: 'Roland' }
-      ],
-      optionalServices: [BLE_MIDI_SERVICE_UUID]
-    });
+    const isAndroid = /android/i.test(navigator.userAgent || '');
+    const requestOptions = isAndroid
+      ? {
+          acceptAllDevices: true,
+          optionalServices: [BLE_MIDI_SERVICE_UUID]
+        }
+      : {
+          filters: [
+            { services: [BLE_MIDI_SERVICE_UUID] },
+            { namePrefix: 'FP' },
+            { namePrefix: 'Roland' },
+            { namePrefix: 'MIDI' }
+          ],
+          optionalServices: [BLE_MIDI_SERVICE_UUID]
+        };
+    const device = await navigator.bluetooth.requestDevice(requestOptions);
 
     statusText.textContent = `Connecting to ${device.name || 'BLE MIDI'}…`;
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(BLE_MIDI_SERVICE_UUID);
-    const characteristic = await service.getCharacteristic(BLE_MIDI_CHAR_UUID);
+
+    // Android BLE stack often throws a transient GATT error if connect() is called
+    // immediately while the scan chooser is still closing; retry up to 3 times.
+    let characteristic = null;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(BLE_MIDI_SERVICE_UUID);
+        characteristic = await service.getCharacteristic(BLE_MIDI_CHAR_UUID);
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!characteristic) {
+      throw lastErr || new Error('GATT connection failed');
+    }
 
     await characteristic.startNotifications();
     const blePort = {
@@ -1036,6 +1073,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-reset-stats').addEventListener('click', () => {
     resetStats();
+  });
+
+  // Toggle 88-Key Piano Monitor visibility
+  const togglePianoBtn = document.getElementById('btn-toggle-piano');
+  const pianoSection = document.getElementById('piano-section');
+  if (togglePianoBtn && pianoSection) {
+    // On short landscape phone screens (e.g. Pixel 9 landscape 915x412), collapse
+    // the 88-key monitor initially so the entire flashcard trainer fits without scrolling.
+    if (window.innerHeight <= 540 && window.innerWidth > window.innerHeight) {
+      pianoSection.classList.add('piano-collapsed');
+      togglePianoBtn.textContent = 'Show Keys';
+      togglePianoBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    togglePianoBtn.addEventListener('click', () => {
+      const collapsed = pianoSection.classList.toggle('piano-collapsed');
+      togglePianoBtn.textContent = collapsed ? 'Show Keys' : 'Hide Keys';
+      togglePianoBtn.setAttribute('aria-expanded', String(!collapsed));
+      if (!collapsed) {
+        updatePianoRangeIndicators();
+      }
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    updatePianoRangeIndicators();
   });
 
   // Start first flashcard & initialize Web MIDI
