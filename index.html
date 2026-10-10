@@ -1,585 +1,196 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Piano Sight Reading Practice</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f0fdf4; /* Light green background */
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            overflow: hidden;
-        }
-
-        #staff-container {
-            position: relative;
-            width: 300px;
-            height: 150px;
-            background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            margin: 2rem 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-
-        @keyframes pulse-success {
-            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
-            70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(74, 222, 128, 0); }
-            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-        }
-
-        @keyframes shake-error {
-            0%, 100% { transform: translateX(0); }
-            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-            20%, 40%, 60%, 80% { transform: translateX(5px); }
-        }
-
-        .success-anim {
-            animation: pulse-success 0.5s ease-out;
-        }
-
-        .error-anim {
-            animation: shake-error 0.5s ease-in-out;
-        }
-        
-        /* SVG Note Colors */
-        .correct-note .note-outer {
-            fill: #22c55e !important;
-        }
-        
-        .incorrect-note .note-outer {
-            fill: #ef4444 !important;
-        }
-
-        .hidden { display: none !important; }
-    </style>
+<html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roland FP-30X Sight-Reading Flashcards</title>
+  <meta name="description" content="Interactive sight-reading flashcard web application for the Roland FP-30X digital piano using Web MIDI API.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&amp;family=Plus+Jakarta+Sans:wght@500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
 </head>
-<body class="text-gray-800">
-
-    <div class="text-center mb-6">
-        <h1 class="text-3xl font-extrabold text-green-800 mb-2">Piano Sight Reading</h1>
-        <div id="midi-status" class="inline-flex items-center px-4 py-2 bg-yellow-100 text-yellow-800 rounded-full text-sm font-semibold shadow-sm">
-            <span class="w-2 h-2 rounded-full bg-yellow-500 mr-2 animate-pulse"></span>
-            Waiting for MIDI connection...
+<body>
+  <div class="app-shell">
+    <!-- Top Hardware / MIDI Connection Console -->
+    <header class="top-console">
+      <div class="brand-group">
+        <div class="brand-mark" aria-hidden="true">♯</div>
+        <div class="brand-titles">
+          <h1>Roland FP-30X Sight-Reading Trainer</h1>
+          <p>Whole-note flashcards • Staff + 0–4 Ledger Lines • Exact Octave MIDI Matching</p>
         </div>
-        <button id="connect-btn" class="mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors shadow-md block mx-auto">
-            Connect Bluetooth MIDI
+      </div>
+
+      <div class="midi-bar">
+        <div id="midi-status-badge" class="midi-status-badge" data-status="disconnected">
+          <span id="midi-dot" class="midi-dot"></span>
+          <span id="midi-status-text">Waiting for Roland FP-30X (connect via USB or Bluetooth MIDI)</span>
+        </div>
+
+        <select id="midi-device-select" class="midi-select" aria-label="Select MIDI Input Device"><option value="none">No MIDI devices detected</option></select>
+
+        <button id="btn-ble-midi" type="button" class="btn-console" title="Connect directly to Roland FP-30X Bluetooth LE MIDI from Chrome">
+          Pair Bluetooth MIDI
         </button>
-        <p class="text-xs text-gray-500 mt-2 max-w-xs mx-auto">
-            Make sure your Roland FP-30x is turned on and Bluetooth is enabled on this device. Note: Web MIDI is usually supported in Chrome/Edge.
-        </p>
-        
-        <div id="troubleshooting" class="hidden mt-4 p-4 bg-red-50 text-red-800 text-sm rounded-lg text-left max-w-sm mx-auto border border-red-200 shadow-sm">
-            <strong>Troubleshooting:</strong>
-            <ul class="list-disc pl-5 mt-2 space-y-1">
-                <li><strong>iPhone/iPad users:</strong> Standard browsers don't support MIDI. Use an app like <a href="https://apps.apple.com/us/app/web-midi-browser/id953846217" class="underline text-blue-600" target="_blank">Web MIDI Browser</a>.</li>
-                <li><strong>Android/PC users:</strong> Ensure you are using Google Chrome or Microsoft Edge.</li>
-                <li><strong>Permissions:</strong> Check your browser URL bar (the lock icon 🔒) to ensure MIDI or Bluetooth access isn't blocked.</li>
-                <li><strong>Gemini Preview:</strong> If you are viewing this inside the Gemini preview window, hardware access is blocked by default. Use the virtual keyboard below or run this file in a separate browser window.</li>
-            </ul>
+
+        <button id="btn-rescan-midi" type="button" class="btn-console">
+          Rescan MIDI
+        </button>
+
+        <button id="btn-download-html" type="button" class="btn-console" title="Download a single self-contained HTML file to open on any laptop">
+          ↓ Download .html
+        </button>
+      </div>
+    </header>
+
+    <!-- Practice Settings & Session Statistics -->
+    <section class="controls-panel" aria-label="Practice Configuration and Session Statistics">
+      <div class="settings-group">
+        <div class="control-block">
+          <span class="control-label">Clef</span>
+          <div class="segmented-control" role="group" aria-label="Clef Selection">
+            <button id="clef-btn-treble" type="button" class="segment-btn" data-clef="treble" aria-pressed="false">
+              Treble
+            </button>
+            <button id="clef-btn-bass" type="button" class="segment-btn" data-clef="bass" aria-pressed="false">
+              Bass
+            </button>
+            <button id="clef-btn-both" type="button" class="segment-btn active" data-clef="both" aria-pressed="true">
+              Both (Random)
+            </button>
+          </div>
         </div>
-    </div>
 
-    <div class="bg-white p-4 rounded-xl shadow-md mb-4 flex gap-4 items-center z-30">
-        <label class="font-semibold text-gray-700">Clef:</label>
-        <div class="flex bg-gray-100 rounded-lg p-1">
-            <button id="btn-treble" class="px-4 py-1 rounded-md bg-white shadow-sm font-medium text-green-700 transition-colors">Treble</button>
-            <button id="btn-bass" class="px-4 py-1 rounded-md text-gray-600 font-medium hover:text-gray-900 transition-colors">Bass</button>
+        <div class="control-block">
+          <label class="control-label" for="select-ledger-lines">Ledger Lines</label>
+          <select id="select-ledger-lines" class="ledger-select" aria-label="Number of Ledger Lines">
+            <option value="0">0 (Staff Only)</option>
+            <option value="1">1 Ledger Line</option>
+            <option value="2">2 Ledger Lines</option>
+            <option value="3" selected="">3 Ledger Lines</option>
+            <option value="4">4 Ledger Lines</option>
+          </select>
         </div>
-    </div>
 
-    <div id="staff-container">
-        <svg id="staff-svg" viewBox="0 0 300 150" width="100%" height="100%">
-            <!-- Staff Lines precisely mapped -->
-            <path d="M 20 55 L 280 55 M 20 65 L 280 65 M 20 75 L 280 75 M 20 85 L 280 85 M 20 95 L 280 95" stroke="#333" stroke-width="2" />
-            
-            <!-- Clefs mapped strictly to lines (e.g. Treble curl on G-line, Bass dots on F-line) -->
-            <g id="clef-treble">
-                <path d="M 35 30 L 35 105 C 35 115, 25 115, 25 105 C 25 100, 30 98, 35 100" fill="none" stroke="#333" stroke-width="2.5" stroke-linecap="round"/>
-                <path d="M 35 30 C 50 20, 55 50, 35 65" fill="none" stroke="#333" stroke-width="2.5"/>
-                <path d="M 35 65 C 15 65, 15 95, 35 95 C 55 95, 55 75, 35 75 C 23 75, 23 85, 35 85" fill="none" stroke="#333" stroke-width="2.5" stroke-linecap="round"/>
-                <circle cx="35" cy="85" r="2.5" fill="#333" />
-            </g>
-            <g id="clef-bass" class="hidden">
-                <circle cx="25" cy="65" r="4.5" fill="#333"/>
-                <path d="M 25 65 C 25 50, 50 50, 50 65 C 50 82, 35 95, 20 95" fill="none" stroke="#333" stroke-width="3" stroke-linecap="round"/>
-                <circle cx="58" cy="58" r="3" fill="#333"/>
-                <circle cx="58" cy="72" r="3" fill="#333"/>
-            </g>
+        <label class="checkbox-toggle" for="toggle-accidentals">
+          <input id="toggle-accidentals" type="checkbox">
+          <span>Include Sharps &amp; Flats (♯ / ♭)</span>
+        </label>
+      </div>
 
-            <!-- Dynamic Group for Notes & Ledgers -->
-            <g id="dynamic-group">
-                <g id="ledgers-group"></g>
-                <!-- Styled strictly as a whole note -->
-                <g id="current-note" transform="translate(150, -50)">
-                    <ellipse class="note-outer" cx="0" cy="0" rx="11" ry="8" fill="#333" transform="rotate(-15)"/>
-                    <ellipse class="note-inner" cx="0" cy="0" rx="6" ry="4" fill="white" transform="rotate(-15)"/>
-                </g>
-            </g>
-        </svg>
-    </div>
-
-    <div id="feedback-message" class="h-8 text-lg font-bold text-transparent transition-colors duration-300">
-        Placeholder
-    </div>
-
-    <!-- Virtual Keyboard for testing without a real MIDI device -->
-    <div id="virtual-keyboard" class="hidden mt-6 flex-col items-center">
-        <p class="text-sm font-semibold text-gray-600 mb-2">Virtual Keyboard (Fallback)</p>
-        <div class="flex gap-1 overflow-x-auto max-w-full pb-2 px-4" id="keyboard-keys">
-            <!-- Keys generated by JS -->
+      <div class="stats-group">
+        <div class="stat-pill">
+          <span class="stat-label">Streak</span>
+          <span id="stat-streak" class="stat-value">0</span>
+          <span id="stat-best-streak" class="stat-sub">Best: 0</span>
         </div>
-    </div>
 
-    <script>
-        // Configuration
-        const STAFF_LINE_SPACING = 10; 
-        const STAFF_CENTER_Y = 75; 
-        
-        let currentClef = 'treble'; // 'treble' or 'bass'
-        let targetMidiNote = null;
-        let midiAccess = null;
-        
-        // Note ranges for practice
-        // Treble: Middle C (C4, MIDI 60) to A5 (MIDI 81)
-        const TREBLE_RANGE = { min: 60, max: 81 };
-        // Bass: E2 (MIDI 40) to Middle C (C4, MIDI 60)
-        const BASS_RANGE = { min: 40, max: 60 };
+        <div class="stat-pill">
+          <span class="stat-label">Accuracy</span>
+          <span id="stat-accuracy" class="stat-value">—</span>
+          <span id="stat-attempts" class="stat-sub">0 / 0 keys</span>
+        </div>
 
-        /* 
-         Mapping MIDI notes directly to pixel Y positions on the SVG staff.
-         Staff lines are firmly established at Y: 55, 65, 75, 85, 95.
-        */
-        const notePositions = {
-            treble: {
-                60: { y: 105, ledgers: [105], name: 'C4' }, 
-                62: { y: 100, ledgers: [], name: 'D4' },
-                64: { y: 95, ledgers: [], name: 'E4' }, 
-                65: { y: 90, ledgers: [], name: 'F4' },
-                67: { y: 85, ledgers: [], name: 'G4' }, 
-                69: { y: 80, ledgers: [], name: 'A4' },
-                71: { y: 75, ledgers: [], name: 'B4' }, 
-                72: { y: 70, ledgers: [], name: 'C5' },
-                74: { y: 65, ledgers: [], name: 'D5' }, 
-                76: { y: 60, ledgers: [], name: 'E5' },
-                77: { y: 55, ledgers: [], name: 'F5' }, 
-                79: { y: 50, ledgers: [], name: 'G5' }, 
-                81: { y: 45, ledgers: [45], name: 'A5' }
-            },
-            bass: {
-                40: { y: 105, ledgers: [105], name: 'E2' },
-                41: { y: 100, ledgers: [], name: 'F2' },
-                43: { y: 95, ledgers: [], name: 'G2' }, 
-                45: { y: 90, ledgers: [], name: 'A2' },
-                47: { y: 85, ledgers: [], name: 'B2' },
-                48: { y: 80, ledgers: [], name: 'C3' },
-                50: { y: 75, ledgers: [], name: 'D3' }, 
-                52: { y: 70, ledgers: [], name: 'E3' },
-                53: { y: 65, ledgers: [], name: 'F3' },
-                55: { y: 60, ledgers: [], name: 'G3' },
-                57: { y: 55, ledgers: [], name: 'A3' }, 
-                59: { y: 50, ledgers: [], name: 'B3' },
-                60: { y: 45, ledgers: [45], name: 'C4' } 
-            }
-        };
+        <div class="stat-pill">
+          <span class="stat-label">Avg Time</span>
+          <span id="stat-avg-time" class="stat-value">—</span>
+          <span id="stat-last-time" class="stat-sub">Last: —</span>
+        </div>
 
-        const statusEl = document.getElementById('midi-status');
-        const connectBtn = document.getElementById('connect-btn');
-        const btnTreble = document.getElementById('btn-treble');
-        const btnBass = document.getElementById('btn-bass');
-        
-        const noteEl = document.getElementById('current-note');
-        const ledgersGroup = document.getElementById('ledgers-group');
-        const clefTreble = document.getElementById('clef-treble');
-        const clefBass = document.getElementById('clef-bass');
-        
-        const staffContainer = document.getElementById('staff-container');
-        const feedbackMsg = document.getElementById('feedback-message');
-        
-        // Ledger lines
-        const ledgers = {
-            'top-2': document.getElementById('ledger-line-top-2'),
-            'top-1': document.getElementById('ledger-line-top-1'),
-            'bottom-1': document.getElementById('ledger-line-bottom-1'),
-            'bottom-2': document.getElementById('ledger-line-bottom-2')
-        };
-        
-        const virtualKeyboard = document.getElementById('virtual-keyboard');
-        const keyboardKeysContainer = document.getElementById('keyboard-keys');
+        <button id="btn-reset-stats" type="button" class="btn-secondary">
+          Reset Stats
+        </button>
+      </div>
+    </section>
 
-        // Note names mapping for virtual keyboard
-        const NOTE_NAMES = {
-            0: 'C', 1: 'C#', 2: 'D', 3: 'D#', 4: 'E', 5: 'F', 
-            6: 'F#', 7: 'G', 8: 'G#', 9: 'A', 10: 'A#', 11: 'B'
-        };
+    <!-- Main Flashcard Sheet Music Stage -->
+    <main class="stage-grid">
+      <section id="flashcard-container" class="flashcard-container" aria-live="polite">
+        <div class="card-meta-row">
+          <div class="clef-indicator">
+            <span id="current-clef-label">Treble Clef (G)</span>
+          </div>
+          <span id="current-range-tag" class="range-tag">F3 – E6 (3 ledger lines)</span>
+        </div>
 
-        function buildVirtualKeyboard() {
-            keyboardKeysContainer.innerHTML = '';
-            // Build keys for both Bass and Treble ranges (approx E2 to A5)
-            for (let i = BASS_RANGE.min; i <= TREBLE_RANGE.max; i++) {
-                const noteName = NOTE_NAMES[i % 12];
-                const isBlackKey = noteName.includes('#');
-                
-                // Only show natural notes for this basic practice app to save space
-                if (!isBlackKey) {
-                    const octave = Math.floor(i / 12) - 1;
-                    const btn = document.createElement('button');
-                    btn.className = 'w-10 h-32 bg-white border border-gray-300 rounded-b-md shadow-sm hover:bg-gray-100 active:bg-gray-200 flex items-end justify-center pb-2 text-xs font-medium text-gray-500 transition-colors shrink-0';
-                    btn.textContent = `${noteName}${octave}`;
-                    btn.onclick = () => handleNotePressed(i);
-                    keyboardKeysContainer.appendChild(btn);
-                }
-            }
-        }
+        <div class="staff-viewport">
+          <svg id="staff-svg" viewBox="0 0 680 320" role="img" aria-label="Musical staff flashcard showing a whole note">
+    <line x1="70" y1="120" x2="70" y2="200" stroke="#1e1d1a" stroke-width="2.5"></line>
+    <line x1="604" y1="120" x2="604" y2="200" stroke="#1e1d1a" stroke-width="1.5"></line>
+    <line x1="610" y1="120" x2="610" y2="200" stroke="#1e1d1a" stroke-width="4"></line>
+  
+<line x1="70" y1="200" x2="610" y2="200" stroke="#1e1d1a" stroke-width="1.8"></line>
+<line x1="70" y1="180" x2="610" y2="180" stroke="#1e1d1a" stroke-width="1.8"></line>
+<line x1="70" y1="160" x2="610" y2="160" stroke="#1e1d1a" stroke-width="1.8"></line>
+<line x1="70" y1="140" x2="610" y2="140" stroke="#1e1d1a" stroke-width="1.8"></line>
+<line x1="70" y1="120" x2="610" y2="120" stroke="#1e1d1a" stroke-width="1.8"></line>
 
-        function getAvailableNotes(clef) {
-            // Filter out accidentals (sharps/flats) for basic practice
-            const validNotes = [0, 2, 4, 5, 7, 9, 11]; // Intervals from C
-            const range = clef === 'treble' ? TREBLE_RANGE : BASS_RANGE;
-            const available = [];
-            
-            for (let i = range.min; i <= range.max; i++) {
-                if (validNotes.includes(i % 12) && notePositions[clef][i]) {
-                    available.push(i);
-                }
-            }
-            return available;
-        }
+    <g transform="translate(118, 180)" fill="none" stroke="#1e1d1a">
+      <!-- Main vertical spine from bottom hook up through top loop -->
+      <path d="
+        M -6 38
+        C -14 38, -18 31, -13 25
+        C -9 20, -2 23, -2 29
+        C -2 34, -8 37, -4 38
+        C 3 38, 6 30, 5 18
+        L -3 -68
+        C -4 -82, 6 -92, 12 -82
+        C 18 -72, 12 -52, -4 -36
+        C -22 -18, -28 -2, -24 12
+        C -19 25, 2 28, 16 18
+        C 28 9, 27 -9, 14 -16
+        C 2 -22, -12 -14, -12 -2
+        C -12 8, -3 13, 5 8
+      " stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path>
+      <!-- Filled terminal dot at bottom hook -->
+      <circle cx="-11" cy="31" r="4.2" fill="#1e1d1a" stroke="none"></circle>
+    </g>
+  
 
-        function generateNewNote() {
-            const availableNotes = getAvailableNotes(currentClef);
-            
-            let newNote;
-            do {
-                const randomIndex = Math.floor(Math.random() * availableNotes.length);
-                newNote = availableNotes[randomIndex];
-            } while (newNote === targetMidiNote && availableNotes.length > 1);
-            
-            targetMidiNote = newNote;
-            drawNote(targetMidiNote, currentClef);
-            
-            noteEl.classList.remove('correct-note', 'incorrect-note');
-            feedbackMsg.classList.remove('text-green-600', 'text-red-600');
-            feedbackMsg.classList.add('text-transparent');
-            console.log(`Target note generated: MIDI ${targetMidiNote} (${notePositions[currentClef][targetMidiNote].name})`);
-        }
 
-        function drawNote(midiNumber, clef) {
-            const noteData = notePositions[clef][midiNumber];
-            if (!noteData) {
-                console.error("No visual data for MIDI note", midiNumber);
-                return;
-            }
+    <g opacity="1">
+      <defs>
+        <mask id="whole-note-cutout-370-160">
+          <rect x="345" y="140" width="50" height="40" fill="white"></rect>
+          <ellipse cx="370" cy="160" rx="7.2" ry="5.1" transform="rotate(-24 370 160)" fill="black"></ellipse>
+        </mask>
+      </defs>
+      <ellipse cx="370" cy="160" rx="13.8" ry="9.2" fill="#181715" mask="url(#whole-note-cutout-370-160)"></ellipse>
+    </g>
+  </svg>
+        </div>
 
-            // Move the whole note group to the exact Y pixel assigned in map
-            noteEl.setAttribute('transform', `translate(150, ${noteData.y})`);
+        <div id="feedback-banner" class="feedback-banner feedback-waiting">
+          <div class="feedback-main">
+            <span id="feedback-main-text">Play the note on your Roland FP-30X (or click a piano key below)</span>
+          </div>
+          <span id="feedback-detail-text" class="feedback-detail"></span>
+        </div>
 
-            // Clear old ledger lines entirely
-            ledgersGroup.innerHTML = '';
+        <div class="card-actions-row">
+          <button id="btn-skip-note" type="button" class="btn-secondary">
+            Skip / Next Note →
+          </button>
+        </div>
+      </section>
 
-            // Draw new ledger lines if required by note
-            noteData.ledgers.forEach(ledgerY => {
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', '130');
-                line.setAttribute('y1', ledgerY);
-                line.setAttribute('x2', '170');
-                line.setAttribute('y2', ledgerY);
-                line.setAttribute('stroke', '#333');
-                line.setAttribute('stroke-width', '2');
-                ledgersGroup.appendChild(line);
-            });
-        }
+      <!-- 88-Key Roland FP-30X Visual Monitor & Clickable Fallback -->
+      <section class="piano-section" aria-label="88-Key Piano Monitor">
+        <div class="piano-header">
+          <div class="piano-title-group">
+            <span class="piano-title">Roland FP-30X 88-Key Monitor (A0 – C8)</span>
+            <span class="piano-subtitle">Amber underline marks the active clef’s note range • Click any key to test without MIDI</span>
+          </div>
+        </div>
 
-        function setClef(clef) {
-            currentClef = clef;
-            
-            if (clef === 'treble') {
-                btnTreble.classList.replace('text-gray-600', 'text-green-700');
-                btnTreble.classList.replace('hover:text-gray-900', 'bg-white');
-                btnTreble.classList.add('shadow-sm');
-                btnBass.classList.replace('text-green-700', 'text-gray-600');
-                btnBass.classList.replace('bg-white', 'hover:text-gray-900');
-                btnBass.classList.remove('shadow-sm');
-                
-                clefTreble.classList.remove('hidden');
-                clefBass.classList.add('hidden');
-            } else {
-                btnBass.classList.replace('text-gray-600', 'text-green-700');
-                btnBass.classList.replace('hover:text-gray-900', 'bg-white');
-                btnBass.classList.add('shadow-sm');
-                btnTreble.classList.replace('text-green-700', 'text-gray-600');
-                btnTreble.classList.replace('bg-white', 'hover:text-gray-900');
-                btnTreble.classList.remove('shadow-sm');
-                
-                clefBass.classList.remove('hidden');
-                clefTreble.classList.add('hidden');
-            }
-            
-            generateNewNote();
-        }
+        <div class="piano-scroll-wrapper">
+          <div id="piano-keyboard" class="piano-keyboard"><div class="white-key" data-midi="21" title="A0 (MIDI 21)"><span class="key-label">A0</span></div><div class="white-key" data-midi="23" title="B0 (MIDI 23)"></div><div class="white-key" data-midi="24" title="C1 (MIDI 24)"><span class="key-label">C1</span></div><div class="white-key" data-midi="26" title="D1 (MIDI 26)"></div><div class="white-key" data-midi="28" title="E1 (MIDI 28)"></div><div class="white-key" data-midi="29" title="F1 (MIDI 29)"></div><div class="white-key" data-midi="31" title="G1 (MIDI 31)"></div><div class="white-key" data-midi="33" title="A1 (MIDI 33)"></div><div class="white-key" data-midi="35" title="B1 (MIDI 35)"></div><div class="white-key" data-midi="36" title="C2 (MIDI 36)"><span class="key-label">C2</span></div><div class="white-key" data-midi="38" title="D2 (MIDI 38)"></div><div class="white-key" data-midi="40" title="E2 (MIDI 40)"></div><div class="white-key" data-midi="41" title="F2 (MIDI 41)"></div><div class="white-key" data-midi="43" title="G2 (MIDI 43)"></div><div class="white-key" data-midi="45" title="A2 (MIDI 45)"></div><div class="white-key" data-midi="47" title="B2 (MIDI 47)"></div><div class="white-key" data-midi="48" title="C3 (MIDI 48)"><span class="key-label">C3</span></div><div class="white-key" data-midi="50" title="D3 (MIDI 50)"></div><div class="white-key" data-midi="52" title="E3 (MIDI 52)"></div><div class="white-key key-in-range" data-midi="53" title="F3 (MIDI 53)"></div><div class="white-key key-in-range" data-midi="55" title="G3 (MIDI 55)"></div><div class="white-key key-in-range" data-midi="57" title="A3 (MIDI 57)"></div><div class="white-key key-in-range" data-midi="59" title="B3 (MIDI 59)"></div><div class="white-key middle-c key-in-range" data-midi="60" title="C4 (MIDI 60)"><span class="key-label">C4</span></div><div class="white-key key-in-range" data-midi="62" title="D4 (MIDI 62)"></div><div class="white-key key-in-range" data-midi="64" title="E4 (MIDI 64)"></div><div class="white-key key-in-range" data-midi="65" title="F4 (MIDI 65)"></div><div class="white-key key-in-range" data-midi="67" title="G4 (MIDI 67)"></div><div class="white-key key-in-range" data-midi="69" title="A4 (MIDI 69)"></div><div class="white-key key-in-range" data-midi="71" title="B4 (MIDI 71)"></div><div class="white-key key-in-range" data-midi="72" title="C5 (MIDI 72)"><span class="key-label">C5</span></div><div class="white-key key-in-range" data-midi="74" title="D5 (MIDI 74)"></div><div class="white-key key-in-range" data-midi="76" title="E5 (MIDI 76)"></div><div class="white-key key-in-range" data-midi="77" title="F5 (MIDI 77)"></div><div class="white-key key-in-range" data-midi="79" title="G5 (MIDI 79)"></div><div class="white-key key-in-range" data-midi="81" title="A5 (MIDI 81)"></div><div class="white-key key-in-range" data-midi="83" title="B5 (MIDI 83)"></div><div class="white-key key-in-range" data-midi="84" title="C6 (MIDI 84)"><span class="key-label">C6</span></div><div class="white-key key-in-range" data-midi="86" title="D6 (MIDI 86)"></div><div class="white-key key-in-range" data-midi="88" title="E6 (MIDI 88)"></div><div class="white-key" data-midi="89" title="F6 (MIDI 89)"></div><div class="white-key" data-midi="91" title="G6 (MIDI 91)"></div><div class="white-key" data-midi="93" title="A6 (MIDI 93)"></div><div class="white-key" data-midi="95" title="B6 (MIDI 95)"></div><div class="white-key" data-midi="96" title="C7 (MIDI 96)"><span class="key-label">C7</span></div><div class="white-key" data-midi="98" title="D7 (MIDI 98)"></div><div class="white-key" data-midi="100" title="E7 (MIDI 100)"></div><div class="white-key" data-midi="101" title="F7 (MIDI 101)"></div><div class="white-key" data-midi="103" title="G7 (MIDI 103)"></div><div class="white-key" data-midi="105" title="A7 (MIDI 105)"></div><div class="white-key" data-midi="107" title="B7 (MIDI 107)"></div><div class="white-key" data-midi="108" title="C8 (MIDI 108)"><span class="key-label">C8</span></div><div class="black-key" data-midi="22" title="A♯0 / B♭0 (MIDI 22)" style="left: 1.30769%; width: 1.23077%;"></div><div class="black-key" data-midi="25" title="C♯1 / D♭1 (MIDI 25)" style="left: 5.15385%; width: 1.23077%;"></div><div class="black-key" data-midi="27" title="D♯1 / E♭1 (MIDI 27)" style="left: 7.07692%; width: 1.23077%;"></div><div class="black-key" data-midi="30" title="F♯1 / G♭1 (MIDI 30)" style="left: 10.9231%; width: 1.23077%;"></div><div class="black-key" data-midi="32" title="G♯1 / A♭1 (MIDI 32)" style="left: 12.8462%; width: 1.23077%;"></div><div class="black-key" data-midi="34" title="A♯1 / B♭1 (MIDI 34)" style="left: 14.7692%; width: 1.23077%;"></div><div class="black-key" data-midi="37" title="C♯2 / D♭2 (MIDI 37)" style="left: 18.6154%; width: 1.23077%;"></div><div class="black-key" data-midi="39" title="D♯2 / E♭2 (MIDI 39)" style="left: 20.5385%; width: 1.23077%;"></div><div class="black-key" data-midi="42" title="F♯2 / G♭2 (MIDI 42)" style="left: 24.3846%; width: 1.23077%;"></div><div class="black-key" data-midi="44" title="G♯2 / A♭2 (MIDI 44)" style="left: 26.3077%; width: 1.23077%;"></div><div class="black-key" data-midi="46" title="A♯2 / B♭2 (MIDI 46)" style="left: 28.2308%; width: 1.23077%;"></div><div class="black-key" data-midi="49" title="C♯3 / D♭3 (MIDI 49)" style="left: 32.0769%; width: 1.23077%;"></div><div class="black-key" data-midi="51" title="D♯3 / E♭3 (MIDI 51)" style="left: 34%; width: 1.23077%;"></div><div class="black-key" data-midi="54" title="F♯3 / G♭3 (MIDI 54)" style="left: 37.8462%; width: 1.23077%;"></div><div class="black-key" data-midi="56" title="G♯3 / A♭3 (MIDI 56)" style="left: 39.7692%; width: 1.23077%;"></div><div class="black-key" data-midi="58" title="A♯3 / B♭3 (MIDI 58)" style="left: 41.6923%; width: 1.23077%;"></div><div class="black-key" data-midi="61" title="C♯4 / D♭4 (MIDI 61)" style="left: 45.5385%; width: 1.23077%;"></div><div class="black-key" data-midi="63" title="D♯4 / E♭4 (MIDI 63)" style="left: 47.4615%; width: 1.23077%;"></div><div class="black-key" data-midi="66" title="F♯4 / G♭4 (MIDI 66)" style="left: 51.3077%; width: 1.23077%;"></div><div class="black-key" data-midi="68" title="G♯4 / A♭4 (MIDI 68)" style="left: 53.2308%; width: 1.23077%;"></div><div class="black-key" data-midi="70" title="A♯4 / B♭4 (MIDI 70)" style="left: 55.1538%; width: 1.23077%;"></div><div class="black-key" data-midi="73" title="C♯5 / D♭5 (MIDI 73)" style="left: 59%; width: 1.23077%;"></div><div class="black-key" data-midi="75" title="D♯5 / E♭5 (MIDI 75)" style="left: 60.9231%; width: 1.23077%;"></div><div class="black-key" data-midi="78" title="F♯5 / G♭5 (MIDI 78)" style="left: 64.7692%; width: 1.23077%;"></div><div class="black-key" data-midi="80" title="G♯5 / A♭5 (MIDI 80)" style="left: 66.6923%; width: 1.23077%;"></div><div class="black-key" data-midi="82" title="A♯5 / B♭5 (MIDI 82)" style="left: 68.6154%; width: 1.23077%;"></div><div class="black-key" data-midi="85" title="C♯6 / D♭6 (MIDI 85)" style="left: 72.4615%; width: 1.23077%;"></div><div class="black-key" data-midi="87" title="D♯6 / E♭6 (MIDI 87)" style="left: 74.3846%; width: 1.23077%;"></div><div class="black-key" data-midi="90" title="F♯6 / G♭6 (MIDI 90)" style="left: 78.2308%; width: 1.23077%;"></div><div class="black-key" data-midi="92" title="G♯6 / A♭6 (MIDI 92)" style="left: 80.1538%; width: 1.23077%;"></div><div class="black-key" data-midi="94" title="A♯6 / B♭6 (MIDI 94)" style="left: 82.0769%; width: 1.23077%;"></div><div class="black-key" data-midi="97" title="C♯7 / D♭7 (MIDI 97)" style="left: 85.9231%; width: 1.23077%;"></div><div class="black-key" data-midi="99" title="D♯7 / E♭7 (MIDI 99)" style="left: 87.8462%; width: 1.23077%;"></div><div class="black-key" data-midi="102" title="F♯7 / G♭7 (MIDI 102)" style="left: 91.6923%; width: 1.23077%;"></div><div class="black-key" data-midi="104" title="G♯7 / A♭7 (MIDI 104)" style="left: 93.6154%; width: 1.23077%;"></div><div class="black-key" data-midi="106" title="A♯7 / B♭7 (MIDI 106)" style="left: 95.5385%; width: 1.23077%;"></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
 
-        btnTreble.addEventListener('click', () => setClef('treble'));
-        btnBass.addEventListener('click', () => setClef('bass'));
+  <script src="app.js"></script>
 
-        function onMIDIMessage(event) {
-            // Need to handle different MIDI message formats
-            // Data format: [Status, Data1 (Note), Data2 (Velocity)]
-            const status = event.data[0] & 0xf0; // Mask off channel
-            const note = event.data[1];
-            const velocity = event.data[2];
 
-            // Some keyboards send Note On with 0 velocity as Note Off
-            if (status === 144 && velocity > 0) { // Note On (144)
-                handleNotePressed(note);
-            }
-        }
-
-        function handleNotePressed(note) {
-            if (targetMidiNote === null) return;
-            
-            // Only process natural notes in the current clef's range to avoid firing on random off-screen keys
-            const range = currentClef === 'treble' ? TREBLE_RANGE : BASS_RANGE;
-            
-            if (note === targetMidiNote) {
-                // Success
-                noteEl.classList.remove('incorrect-note');
-                noteEl.classList.add('correct-note');
-                staffContainer.classList.add('success-anim');
-                
-                feedbackMsg.textContent = "Correct!";
-                feedbackMsg.classList.remove('text-transparent', 'text-red-600');
-                feedbackMsg.classList.add('text-green-600');
-                
-                setTimeout(() => {
-                    staffContainer.classList.remove('success-anim');
-                    generateNewNote();
-                }, 700); 
-                
-            } else {
-                // Incorrect
-                noteEl.classList.add('incorrect-note');
-                staffContainer.classList.remove('error-anim');
-                // Trigger reflow to restart animation
-                void staffContainer.offsetWidth; 
-                staffContainer.classList.add('error-anim');
-                
-                feedbackMsg.textContent = "Try Again";
-                feedbackMsg.classList.remove('text-transparent', 'text-green-600');
-                feedbackMsg.classList.add('text-red-600');
-                
-                setTimeout(() => {
-                    staffContainer.classList.remove('error-anim');
-                    noteEl.classList.remove('incorrect-note');
-                }, 500);
-            }
-        }
-
-        function updateStatus(state, message) {
-            const span = statusEl.querySelector('span');
-            const troubleshootEl = document.getElementById('troubleshooting');
-            
-            statusEl.classList.remove('bg-yellow-100', 'text-yellow-800', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800');
-            span.classList.remove('bg-yellow-500', 'bg-green-500', 'bg-red-500', 'animate-pulse');
-            if (troubleshootEl) troubleshootEl.classList.add('hidden');
-            
-            if (state === 'connecting') {
-                statusEl.classList.add('bg-yellow-100', 'text-yellow-800');
-                span.classList.add('bg-yellow-500', 'animate-pulse');
-                connectBtn.style.display = 'block';
-                virtualKeyboard.classList.add('hidden');
-            } else if (state === 'connected') {
-                statusEl.classList.add('bg-green-100', 'text-green-800');
-                span.classList.add('bg-green-500');
-                connectBtn.style.display = 'none';
-                virtualKeyboard.classList.add('hidden');
-                generateNewNote(); // Start game
-            } else if (state === 'error') {
-                statusEl.classList.add('bg-red-100', 'text-red-800');
-                span.classList.add('bg-red-500');
-                connectBtn.style.display = 'block';
-                connectBtn.textContent = 'Retry Connection';
-                if (troubleshootEl) troubleshootEl.classList.remove('hidden');
-                
-                // Show virtual keyboard as fallback
-                buildVirtualKeyboard();
-                virtualKeyboard.classList.remove('hidden');
-                virtualKeyboard.classList.add('flex');
-                generateNewNote(); // Let them play with virtual keys
-            }
-            
-            statusEl.lastChild.textContent = message;
-        }
-
-        function onMIDISuccess(midi) {
-            midiAccess = midi;
-            let inputs = midiAccess.inputs.values();
-            let connected = false;
-
-            for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
-                input.value.onmidimessage = onMIDIMessage;
-                connected = true;
-                console.log(`Connected to MIDI Input: ${input.value.name}`);
-            }
-
-            if (connected) {
-                updateStatus('connected', ' Connected to Piano');
-            } else {
-                updateStatus('error', ' No MIDI devices found. Check Bluetooth/Cable.');
-            }
-
-            // Listen for connections/disconnections
-            midiAccess.onstatechange = (e) => {
-                if (e.port.type === 'input') {
-                    if (e.port.state === 'connected') {
-                        e.port.onmidimessage = onMIDIMessage;
-                        updateStatus('connected', ' Connected to Piano');
-                    } else {
-                        updateStatus('error', ' Piano disconnected');
-                    }
-                }
-            };
-        }
-
-        function onMIDIFailure(msg) {
-            console.error("Failed to get MIDI access - " + msg);
-            updateStatus('error', ' MIDI access denied or not supported.');
-        }
-
-        // --- NEW DIRECT BLUETOOTH GATT LOGIC ---
-        const BLE_MIDI_SERVICE = '03b80e5a-ede8-4b33-a751-6ce34ec4c700';
-        const BLE_MIDI_CHAR = '7772e5db-3868-4112-a1a9-f2669d106bf3';
-        let bleRunningStatus = null;
-
-        function parseBLEMIDI(event) {
-            const data = new Uint8Array(event.target.value.buffer);
-            // data[0] is the Header (Timestamp High). Skip it.
-            let i = 1; 
-            
-            while (i < data.length) {
-                let byte = data[i];
-                
-                // Check if this byte is a Timestamp (MSB is 1)
-                if ((byte & 0x80) !== 0) {
-                    // Is the next byte a Status byte? (also MSB = 1)
-                    if (i + 1 < data.length && (data[i+1] & 0x80) !== 0) {
-                        bleRunningStatus = data[i+1]; // Save Status (e.g., Note On)
-                        i += 2; // Move past Timestamp and Status
-                    } else {
-                        // Next byte is Data. This implies "Running Status" (reusing the last status)
-                        i++; // Move past Timestamp
-                    }
-                    
-                    // Now parse the Data based on the active Status
-                    if (bleRunningStatus) {
-                        let statusType = bleRunningStatus & 0xF0;
-                        if (statusType === 0x90) { // 0x90 is Note On
-                            if (i + 1 < data.length) {
-                                let note = data[i];
-                                let vel = data[i+1];
-                                // Process the note if velocity is greater than 0
-                                if (note < 128 && vel < 128 && vel > 0) {
-                                    handleNotePressed(note);
-                                }
-                                i += 2;
-                            } else { break; }
-                        } else if (statusType === 0x80) { // Note Off
-                            i += 2; 
-                        } else if (statusType === 0xB0 || statusType === 0xE0) { // Control Change / Pitch Bend
-                            i += 2;
-                        } else if (statusType === 0xC0 || statusType === 0xD0) { // Program Change
-                            i += 1;
-                        } else {
-                            i++; // Fallback for unknown status
-                        }
-                    }
-                } else {
-                    i++; // Unexpected stray data byte
-                }
-            }
-        }
-
-        async function initMIDI() {
-            updateStatus('connecting', ' Connecting...');
-            
-            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-                updateStatus('error', ' Error: Web MIDI requires an HTTPS connection.');
-                return;
-            }
-
-            // 1. Try Direct Bluetooth GATT Connection (Fixes Android/Roland bug)
-            if (navigator.bluetooth) {
-                try {
-                    updateStatus('connecting', ' Select your Roland from the popup...');
-                    const device = await navigator.bluetooth.requestDevice({
-                        acceptAllDevices: true,
-                        optionalServices: [BLE_MIDI_SERVICE]
-                    });
-                    
-                    updateStatus('connecting', ' Connecting to GATT server...');
-                    const server = await device.gatt.connect();
-                    
-                    updateStatus('connecting', ' Finding MIDI service...');
-                    const service = await server.getPrimaryService(BLE_MIDI_SERVICE);
-                    
-                    updateStatus('connecting', ' Enabling MIDI data...');
-                    const characteristic = await service.getCharacteristic(BLE_MIDI_CHAR);
-                    
-                    await characteristic.startNotifications();
-                    characteristic.addEventListener('characteristicvaluechanged', parseBLEMIDI);
-                    
-                    device.addEventListener('gattserverdisconnected', () => {
-                        updateStatus('error', ' Piano disconnected');
-                    });
-                    
-                    updateStatus('connected', ' Connected to Bluetooth Piano!');
-                    generateNewNote();
-                    return; // Success! Exit function early.
-                    
-                } catch (btError) {
-                    console.log("Web Bluetooth GATT failed or cancelled:", btError);
-                    updateStatus('connecting', ' Falling back to standard USB MIDI...');
-                }
-            }
-
-            // 2. Fallback to Standard Web MIDI (For USB Cables or Desktop users)
-            if (navigator.requestMIDIAccess) {
-                try {
-                    const midiAccess = await navigator.requestMIDIAccess({ sysex: false });
-                    if (midiAccess.inputs.size > 0) {
-                        onMIDISuccess(midiAccess);
-                    } else {
-                        updateStatus('error', ' No MIDI devices found. Check cable or Bluetooth.');
-                        buildVirtualKeyboard();
-                        virtualKeyboard.classList.remove('hidden');
-                        virtualKeyboard.classList.add('flex');
-                    }
-                } catch (error) {
-                    onMIDIFailure(error);
-                }
-            } else {
-                updateStatus('error', ' Web MIDI is not supported in this browser.');
-            }
-        }
-
-        connectBtn.addEventListener('click', initMIDI);
-
-        // Try to connect automatically on load, though browsers often require user gesture
-        window.addEventListener('load', () => {
-             // Generate initial note just for display purposes before connected
-             setClef('treble'); 
-        });
-
-    </script>
-</body>
-</html>
+</body></html>
