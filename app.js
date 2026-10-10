@@ -623,7 +623,7 @@ function buildPianoKeyboard() {
         keyEl.appendChild(label);
       }
 
-      keyEl.addEventListener('mousedown', (e) => {
+      keyEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         handleNotePressed(midi, 'On-Screen Key');
       });
@@ -652,7 +652,7 @@ function buildPianoKeyboard() {
       blackEl.style.left = `${leftPct}%`;
       blackEl.style.width = `${blackKeyWidthPct}%`;
 
-      blackEl.addEventListener('mousedown', (e) => {
+      blackEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         handleNotePressed(midi, 'On-Screen Key');
@@ -845,7 +845,11 @@ async function connectBluetoothMIDI() {
   try {
     statusText.textContent = 'Select FP-30X MIDI in browser popup…';
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [BLE_MIDI_SERVICE_UUID] }],
+      filters: [
+        { services: [BLE_MIDI_SERVICE_UUID] },
+        { namePrefix: 'FP-30' },
+        { namePrefix: 'Roland' }
+      ],
       optionalServices: [BLE_MIDI_SERVICE_UUID]
     });
 
