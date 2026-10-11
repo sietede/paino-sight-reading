@@ -857,22 +857,14 @@ async function connectBluetoothMIDI() {
 
   try {
     statusText.textContent = 'Select FP-30X MIDI in browser popup…';
-    const isAndroid = /android/i.test(navigator.userAgent || '');
-    const requestOptions = isAndroid
-      ? {
-          acceptAllDevices: true,
-          optionalServices: [BLE_MIDI_SERVICE_UUID]
-        }
-      : {
-          filters: [
-            { services: [BLE_MIDI_SERVICE_UUID] },
-            { namePrefix: 'FP' },
-            { namePrefix: 'Roland' },
-            { namePrefix: 'MIDI' }
-          ],
-          optionalServices: [BLE_MIDI_SERVICE_UUID]
-        };
-    const device = await navigator.bluetooth.requestDevice(requestOptions);
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [
+        { services: [BLE_MIDI_SERVICE_UUID] },
+        { namePrefix: 'FP-' },
+        { namePrefix: 'Roland' }
+      ],
+      optionalServices: [BLE_MIDI_SERVICE_UUID]
+    });
 
     statusText.textContent = `Connecting to ${device.name || 'BLE MIDI'}…`;
 
