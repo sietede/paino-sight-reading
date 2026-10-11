@@ -59,10 +59,11 @@ const state = {
     responseTimesMs: []
   },
 
-  // Web MIDI State
+  // Web MIDI & Screen Wake Lock State
   midiAccess: null,
   selectedInputId: 'all',
-  activeInputs: []
+  activeInputs: [],
+  wakeLockSentinel: null
 };
 
 /**
@@ -473,6 +474,7 @@ function renderBassClefSVG(x, baseLineY) {
  * Evaluate a pressed MIDI note (from Roland FP-30X or on-screen keyboard).
  */
 function handleNotePressed(midiNote, sourceLabel = 'MIDI') {
+  requestScreenWakeLock();
   if (!state.currentCard || state.isTransitioning) return;
 
   const card = state.currentCard;
@@ -973,9 +975,51 @@ function parseBLEMIDIPacket(bytes, blePort) {
 }
 
 /**
+ * Screen Wake Lock API: prevents phone/tablet/laptop screen from dimming or
+ * turning off while practicing on the MIDI piano (since MIDI messages do not
+ * count as OS touch/keyboard activity).
+ */
+async function requestScreenWakeLock() {
+  if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') {
+    return;
+  }
+  if (state.wakeLockSentinel && !state.wakeLockSentinel.released) {
+    return;
+  }
+  try {
+    const sentinel = await navigator.wakeLock.request('screen');
+    state.wakeLockSentinel = sentinel;
+    sentinel.addEventListener('release', () => {
+      if (state.wakeLockSentinel === sentinel) {
+        state.wakeLockSentinel = null;
+      }
+    });
+  } catch (_) {
+    // Ignore if blocked by low-power mode or awaiting initial user gesture
+  }
+}
+
+function initScreenWakeLock() {
+  requestScreenWakeLock();
+
+  // Browsers automatically release screen wake locks when a tab is backgrounded
+  // or the screen is locked; re-acquire immediately when visible again.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      requestScreenWakeLock();
+    }
+  });
+
+  // Also ensure wake lock is acquired on any touch, click, or key interaction
+  document.addEventListener('pointerdown', () => requestScreenWakeLock(), { passive: true });
+  document.addEventListener('keydown', () => requestScreenWakeLock(), { passive: true });
+}
+
+/**
  * Wire up UI event listeners on DOMContentLoaded.
  */
 document.addEventListener('DOMContentLoaded', () => {
+  initScreenWakeLock();
   buildPianoKeyboard();
   updateStatsUI();
 
