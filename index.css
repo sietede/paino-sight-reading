@@ -614,7 +614,6 @@ html, body {
   width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
-  scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
 }
 

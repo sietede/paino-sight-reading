@@ -59,11 +59,23 @@ const state = {
     responseTimesMs: []
   },
 
-  // Web MIDI & Screen Wake Lock State
+  // Cached DOM references for zero-reflow hot path
+  keyElementsByMidi: new Map(),
+  whiteKeyElements: [],
+  highlightedKeys: new Set(),
+  lastRangeKey: '',
+
+  // Web MIDI, BLE MIDI & Screen Wake Lock State
   midiAccess: null,
   selectedInputId: 'all',
   activeInputs: [],
-  wakeLockSentinel: null
+  isConnectingBLE: false,
+  bleDevice: null,
+  bleCharacteristic: null,
+  bleValueHandler: null,
+  dotPulseTimer: null,
+  wakeLockSentinel: null,
+  wakeLockPending: false
 };
 
 /**
@@ -602,6 +614,10 @@ function buildPianoKeyboard() {
   const container = document.getElementById('piano-keyboard');
   if (!container) return;
   container.innerHTML = '';
+  state.keyElementsByMidi.clear();
+  state.whiteKeyElements = [];
+  state.highlightedKeys.clear();
+  state.lastRangeKey = '';
 
   const blackSemitones = new Set([1, 3, 6, 8, 10]);
   const whiteKeys = [];
@@ -616,8 +632,7 @@ function buildPianoKeyboard() {
       keyEl.dataset.midi = String(midi);
       keyEl.title = `${midiToNoteName(midi)} (MIDI ${midi})`;
 
-      const octave = Math.floor(midi / 12) - 1;
-      // Label all 'C' keys (C1..C8) and F3/G2 landmarks for easy orientation
+      // Label all 'C' keys (C1..C8) and A0 landmark for easy orientation
       if (semitone === 0 || midi === 21) {
         const label = document.createElement('span');
         label.className = 'key-label';
@@ -632,6 +647,8 @@ function buildPianoKeyboard() {
 
       container.appendChild(keyEl);
       whiteKeys.push({ midi, element: keyEl });
+      state.keyElementsByMidi.set(midi, keyEl);
+      state.whiteKeyElements.push({ midi, element: keyEl });
     }
   }
 
@@ -661,19 +678,22 @@ function buildPianoKeyboard() {
       });
 
       container.appendChild(blackEl);
+      state.keyElementsByMidi.set(midi, blackEl);
     }
   }
 }
 
 function highlightPianoKey(midi, status) {
-  const keyEl = document.querySelector(`[data-midi="${midi}"]`);
+  const keyEl = state.keyElementsByMidi.get(midi);
   if (!keyEl) return;
 
   if (status === 'correct') {
     clearPianoKeyHighlights();
     keyEl.classList.add('key-correct', 'key-active');
+    state.highlightedKeys.add(keyEl);
   } else if (status === 'wrong') {
     keyEl.classList.add('key-wrong', 'key-active');
+    state.highlightedKeys.add(keyEl);
     setTimeout(() => {
       keyEl.classList.remove('key-active');
     }, 220);
@@ -681,16 +701,21 @@ function highlightPianoKey(midi, status) {
 }
 
 function clearPianoKeyHighlights() {
-  document.querySelectorAll('.key-correct, .key-wrong, .key-active').forEach((el) => {
+  if (state.highlightedKeys.size === 0) return;
+  state.highlightedKeys.forEach((el) => {
     el.classList.remove('key-correct', 'key-wrong', 'key-active');
   });
+  state.highlightedKeys.clear();
 }
 
-function updatePianoRangeIndicators() {
-  document.querySelectorAll('.white-key.key-in-range').forEach((el) => {
-    el.classList.remove('key-in-range');
-  });
+function updatePianoRangeIndicators(force = false) {
   if (!state.currentCard) return;
+
+  const rangeKey = `${state.currentCard.clef}:${state.ledgerLines}`;
+  if (!force && state.lastRangeKey === rangeKey) {
+    return;
+  }
+  state.lastRangeKey = rangeKey;
 
   const { minMidi, maxMidi } = getClefStepBounds(
     state.currentCard.clef,
@@ -698,28 +723,39 @@ function updatePianoRangeIndicators() {
   );
 
   const inRangeEls = [];
-  document.querySelectorAll('.white-key').forEach((el) => {
-    const m = Number(el.dataset.midi);
-    if (m >= minMidi && m <= maxMidi) {
-      el.classList.add('key-in-range');
-      inRangeEls.push(el);
+  for (let i = 0; i < state.whiteKeyElements.length; i++) {
+    const { midi, element } = state.whiteKeyElements[i];
+    if (midi >= minMidi && midi <= maxMidi) {
+      element.classList.add('key-in-range');
+      inRangeEls.push(element);
+    } else {
+      element.classList.remove('key-in-range');
     }
-  });
+  }
 
-  // Auto-scroll horizontal piano wrapper on phones/tablets so the active clef range is centered
+  // Defer horizontal scroll calculation to requestAnimationFrame to avoid forced synchronous reflow
   const wrapper = document.getElementById('piano-scroll-wrapper');
-  if (wrapper && inRangeEls.length > 0 && wrapper.scrollWidth > wrapper.clientWidth) {
-    const firstEl = inRangeEls[0];
-    const lastEl = inRangeEls[inRangeEls.length - 1];
-    const rangeCenter =
-      (firstEl.offsetLeft + lastEl.offsetLeft + lastEl.offsetWidth) / 2;
-    const targetScroll = Math.max(0, rangeCenter - wrapper.clientWidth / 2);
-    wrapper.scrollLeft = targetScroll;
+  const pianoSection = document.getElementById('piano-section');
+  if (
+    wrapper &&
+    inRangeEls.length > 0 &&
+    (!pianoSection || !pianoSection.classList.contains('piano-collapsed'))
+  ) {
+    requestAnimationFrame(() => {
+      if (wrapper.scrollWidth > wrapper.clientWidth) {
+        const firstEl = inRangeEls[0];
+        const lastEl = inRangeEls[inRangeEls.length - 1];
+        const rangeCenter =
+          (firstEl.offsetLeft + lastEl.offsetLeft + lastEl.offsetWidth) / 2;
+        const targetScroll = Math.max(0, rangeCenter - wrapper.clientWidth / 2);
+        wrapper.scrollLeft = targetScroll;
+      }
+    });
   }
 }
 
 /**
- * Web MIDI API Integration for Roland FP-30X
+ * Web MIDI API Integration for Roland FP-30X (USB MIDI & macOS Audio MIDI Setup)
  */
 async function initWebMIDI() {
   const badge = document.getElementById('midi-status-badge');
@@ -737,18 +773,26 @@ async function initWebMIDI() {
     state.midiAccess = access;
 
     access.onstatechange = () => {
+      // Do not overwrite active direct Web Bluetooth MIDI session
+      if (state.bleDevice && state.bleDevice.gatt && state.bleDevice.gatt.connected) {
+        return;
+      }
       refreshMIDIInputs();
     };
 
     refreshMIDIInputs();
   } catch (err) {
     badge.dataset.status = 'error';
-    statusText.textContent = 'MIDI permission blocked or unavailable (check browser permission)';
-    selectEl.innerHTML = '<option value="none">MIDI Access Denied</option>';
+    statusText.textContent = 'Tap "Pair Bluetooth MIDI" to connect your Roland FP-30X';
+    selectEl.innerHTML = '<option value="none">Use Pair Bluetooth MIDI</option>';
   }
 }
 
 function refreshMIDIInputs() {
+  if (state.bleDevice && state.bleDevice.gatt && state.bleDevice.gatt.connected) {
+    return;
+  }
+
   const access = state.midiAccess;
   if (!access) return;
 
@@ -759,16 +803,14 @@ function refreshMIDIInputs() {
   const inputs = Array.from(access.inputs.values());
   state.activeInputs = inputs;
 
-  // Clear previous listeners and attach fresh listeners
   inputs.forEach((input) => {
     input.onmidimessage = (event) => onMIDIMessage(event, input);
   });
 
-  // Populate device selector dropdown
   selectEl.innerHTML = '';
   if (inputs.length === 0) {
     badge.dataset.status = 'disconnected';
-    statusText.textContent = 'Waiting for Roland FP-30X (connect via USB or Bluetooth MIDI)';
+    statusText.textContent = 'Waiting for Roland FP-30X (USB or Pair Bluetooth MIDI)';
     const opt = document.createElement('option');
     opt.value = 'none';
     opt.textContent = 'No MIDI devices detected';
@@ -793,7 +835,6 @@ function refreshMIDIInputs() {
     }
   });
 
-  // Auto-select Roland FP-30X if detected and user hasn't manually chosen another existing port
   if (rolandId && (state.selectedInputId === 'all' || !inputs.some((i) => i.id === state.selectedInputId))) {
     state.selectedInputId = rolandId;
   } else if (!inputs.some((i) => i.id === state.selectedInputId)) {
@@ -807,6 +848,19 @@ function refreshMIDIInputs() {
   statusText.textContent = `Connected: ${chosenInput.name || 'MIDI Keyboard'}`;
 }
 
+function pulseMidiDot() {
+  const dot = document.getElementById('midi-dot');
+  if (!dot) return;
+  dot.classList.add('pulse-active');
+  if (state.dotPulseTimer) {
+    clearTimeout(state.dotPulseTimer);
+  }
+  state.dotPulseTimer = setTimeout(() => {
+    dot.classList.remove('pulse-active');
+    state.dotPulseTimer = null;
+  }, 120);
+}
+
 function onMIDIMessage(event, inputPort) {
   if (state.selectedInputId !== 'all' && inputPort.id !== state.selectedInputId) {
     return;
@@ -815,26 +869,22 @@ function onMIDIMessage(event, inputPort) {
   const data = event.data;
   if (!data || data.length < 2) return;
 
-  // Ignore MIDI Active Sensing (0xFE) and System Real-Time messages (0xF8..0xFF)
-  // which Roland FP-30X transmits continuously.
-  if (data[0] >= 0xf0) return;
+  // Fast-path ignore System Common & System Real-Time (0xF0..0xFF), e.g. Active Sensing (0xFE)
+  const status = data[0];
+  if (status >= 0xf0) return;
 
-  const command = data[0] & 0xf0;
+  const command = status & 0xf0;
+  // Only process Note On (0x90) and Note Off (0x80); ignore Control Change (0xB0) pedal/knob floods
+  if (command !== 0x90 && command !== 0x80) return;
+
   const note = data[1];
   const velocity = data.length > 2 ? data[2] : 0;
 
-  // Pulse MIDI indicator dot on any note message
-  const dot = document.getElementById('midi-dot');
-  if (dot) {
-    dot.classList.add('pulse-active');
-    setTimeout(() => dot.classList.remove('pulse-active'), 120);
-  }
-
-  // Note On with velocity > 0 is a key press (velocity === 0 is Note Off)
   if (command === 0x90 && velocity > 0) {
+    pulseMidiDot();
     handleNotePressed(note, inputPort.name || 'Roland FP-30X');
-  } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-    const keyEl = document.querySelector(`[data-midi="${note}"]`);
+  } else {
+    const keyEl = state.keyElementsByMidi.get(note);
     if (keyEl) keyEl.classList.remove('key-active');
   }
 }
@@ -846,10 +896,45 @@ function onMIDIMessage(event, inputPort) {
 const BLE_MIDI_SERVICE_UUID = '03b80e5a-ede8-4b33-a751-6ce34ec4c700';
 const BLE_MIDI_CHAR_UUID = '7772e5db-3868-4112-a1a9-f2669d106bf3';
 
+function withTimeout(promise, ms, label) {
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${(ms / 1000).toFixed(1)}s`));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function cleanupExistingBLEConnection() {
+  if (state.bleCharacteristic && state.bleValueHandler) {
+    try {
+      state.bleCharacteristic.removeEventListener(
+        'characteristicvaluechanged',
+        state.bleValueHandler
+      );
+    } catch (_) {}
+  }
+  state.bleCharacteristic = null;
+  state.bleValueHandler = null;
+
+  if (state.bleDevice && state.bleDevice.gatt && state.bleDevice.gatt.connected) {
+    try {
+      state.bleDevice.gatt.disconnect();
+    } catch (_) {}
+  }
+  state.bleDevice = null;
+}
+
 async function connectBluetoothMIDI() {
+  if (state.isConnectingBLE) return;
+
   const badge = document.getElementById('midi-status-badge');
   const statusText = document.getElementById('midi-status-text');
   const selectEl = document.getElementById('midi-device-select');
+  const bleBtn = document.getElementById('btn-ble-midi');
 
   if (!navigator.bluetooth) {
     badge.dataset.status = 'error';
@@ -857,7 +942,12 @@ async function connectBluetoothMIDI() {
     return;
   }
 
+  state.isConnectingBLE = true;
+  if (bleBtn) bleBtn.disabled = true;
+
   try {
+    cleanupExistingBLEConnection();
+
     statusText.textContent = 'Select FP-30X MIDI in browser popup…';
     const device = await navigator.bluetooth.requestDevice({
       filters: [
@@ -868,42 +958,81 @@ async function connectBluetoothMIDI() {
       optionalServices: [BLE_MIDI_SERVICE_UUID]
     });
 
-    statusText.textContent = `Connecting to ${device.name || 'BLE MIDI'}…`;
+    state.bleDevice = device;
 
-    // Android BLE stack often throws a transient GATT error if connect() is called
-    // immediately while the scan chooser is still closing; retry up to 3 times.
+    // Connect GATT and discover BLE MIDI characteristic with per-attempt timeouts
+    // so a stalled Android GATT service discovery never hangs for 20-30s.
     let characteristic = null;
     let lastErr = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await new Promise((r) => setTimeout(r, 250 * attempt));
-        const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(BLE_MIDI_SERVICE_UUID);
-        characteristic = await service.getCharacteristic(BLE_MIDI_CHAR_UUID);
+        if (attempt > 1) {
+          statusText.textContent = `Retrying connection (${attempt}/3)…`;
+          try {
+            if (device.gatt && device.gatt.connected) {
+              device.gatt.disconnect();
+            }
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 350));
+        } else {
+          statusText.textContent = `Connecting to ${device.name || 'FP-30X MIDI'}…`;
+          // Brief pause for Android Bluetooth chooser overlay to finish closing
+          await new Promise((r) => setTimeout(r, 180));
+        }
+
+        const server = await withTimeout(
+          device.gatt.connect(),
+          5000,
+          'GATT connect'
+        );
+        statusText.textContent = 'Discovering MIDI service…';
+        const service = await withTimeout(
+          server.getPrimaryService(BLE_MIDI_SERVICE_UUID),
+          5000,
+          'MIDI service discovery'
+        );
+        characteristic = await withTimeout(
+          service.getCharacteristic(BLE_MIDI_CHAR_UUID),
+          4000,
+          'MIDI characteristic lookup'
+        );
         break;
       } catch (e) {
         lastErr = e;
       }
     }
+
     if (!characteristic) {
       throw lastErr || new Error('GATT connection failed');
     }
 
-    await characteristic.startNotifications();
+    statusText.textContent = 'Starting MIDI notifications…';
     const blePort = {
       id: `ble-${device.id || 'fp30x'}`,
       name: `${device.name || 'Roland FP-30X'} (BLE MIDI)`
     };
 
-    characteristic.addEventListener('characteristicvaluechanged', (event) => {
+    const valueHandler = (event) => {
       const dv = event.target.value;
+      if (!dv || dv.byteLength < 3) return;
       const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
       parseBLEMIDIPacket(bytes, blePort);
-    });
+    };
+
+    state.bleCharacteristic = characteristic;
+    state.bleValueHandler = valueHandler;
+    characteristic.addEventListener('characteristicvaluechanged', valueHandler);
+    await withTimeout(
+      characteristic.startNotifications(),
+      5000,
+      'MIDI notifications'
+    );
 
     device.addEventListener('gattserverdisconnected', () => {
-      badge.dataset.status = 'disconnected';
-      statusText.textContent = 'Bluetooth MIDI disconnected — click Pair Bluetooth MIDI to reconnect';
+      if (state.bleDevice === device) {
+        badge.dataset.status = 'disconnected';
+        statusText.textContent = 'Bluetooth MIDI disconnected — tap Pair Bluetooth MIDI to reconnect';
+      }
     });
 
     // Update UI dropdown and status
@@ -919,32 +1048,46 @@ async function connectBluetoothMIDI() {
     selectEl.value = 'all';
   } catch (err) {
     if (err && err.name === 'NotFoundError') {
-      // User closed the chooser dialog
-      refreshMIDIInputs();
+      // User cancelled the chooser dialog
+      if (!state.bleDevice) {
+        badge.dataset.status = 'disconnected';
+        statusText.textContent = 'Tap "Pair Bluetooth MIDI" to connect your Roland FP-30X';
+      }
       return;
     }
     badge.dataset.status = 'error';
     statusText.textContent = `Bluetooth MIDI error: ${err.message || err}`;
+  } finally {
+    state.isConnectingBLE = false;
+    if (bleBtn) bleBtn.disabled = false;
+    // Acquire Screen Wake Lock after BLE connection settles
+    setTimeout(() => requestScreenWakeLock(), 400);
   }
 }
 
 /**
  * Parse a standard BLE MIDI packet (Header byte + [Timestamp, Status, Data1, Data2]...).
+ * Ignores Active Sensing (0xFE), Timing Clock (0xF8), SysEx (0xF0..0xF7), and Control Changes (0xB0).
  */
 function parseBLEMIDIPacket(bytes, blePort) {
-  if (!bytes || bytes.length < 3) return;
+  const len = bytes.length;
+  if (len < 3) return;
+
+  // Fast-path skip for single-message Active Sensing / Real-Time heartbeat packets
+  // (e.g. [Header, Timestamp, 0xFE] which Roland FP-30X sends every 250ms)
+  if (len === 3 && bytes[2] >= 0xf0) return;
 
   let currentStatus = 0;
   let i = 1; // Skip byte 0 (BLE MIDI header byte)
 
-  while (i < bytes.length) {
+  while (i < len) {
     const b = bytes[i];
 
     if (b >= 0x80) {
-      // Timestamp byte (bit 7 = 1). Check if followed by a MIDI status byte:
-      if (i + 1 < bytes.length && bytes[i + 1] >= 0x80) {
+      // High-bit byte: either a Timestamp byte or a Status byte
+      if (i + 1 < len && bytes[i + 1] >= 0x80) {
         const statusCandidate = bytes[i + 1];
-        // Ignore System Real-Time (0xF8..0xFF) like Active Sensing (0xFE)
+        // System Real-Time (0xF8..0xFF) does not affect running status
         if (statusCandidate >= 0xf8) {
           i += 2;
           continue;
@@ -952,7 +1095,7 @@ function parseBLEMIDIPacket(bytes, blePort) {
         currentStatus = statusCandidate;
         i += 2;
       } else {
-        // Timestamp byte preceding running-status data bytes
+        // Timestamp byte preceding running-status data bytes (or trailing byte)
         i += 1;
       }
       continue;
@@ -960,15 +1103,18 @@ function parseBLEMIDIPacket(bytes, blePort) {
 
     // Data byte (< 0x80)
     const cmd = currentStatus & 0xf0;
-    if ((cmd === 0x90 || cmd === 0x80 || cmd === 0xb0 || cmd === 0xe0) && i + 1 < bytes.length && bytes[i + 1] < 0x80) {
-      const data1 = bytes[i];
-      const data2 = bytes[i + 1];
-      if (cmd === 0x90 || cmd === 0x80) {
-        onMIDIMessage({ data: [currentStatus, data1, data2] }, blePort);
+    if (cmd === 0x90 || cmd === 0x80) {
+      if (i + 1 < len && bytes[i + 1] < 0x80) {
+        onMIDIMessage({ data: [currentStatus, b, bytes[i + 1]] }, blePort);
+        i += 2;
+      } else {
+        i += 1;
       }
-      i += 2;
+    } else if (cmd === 0xb0 || cmd === 0xe0 || cmd === 0xa0 || currentStatus === 0xf2) {
+      // 2-data-byte non-note message (Control Change, Pitch Bend, Poly Aftertouch, Song Position)
+      i += i + 1 < len && bytes[i + 1] < 0x80 ? 2 : 1;
     } else {
-      // 1-byte message (0xC0, 0xD0) or unknown
+      // 1-data-byte message (0xC0, 0xD0) or SysEx (0xF0) data payload
       i += 1;
     }
   }
@@ -980,12 +1126,18 @@ function parseBLEMIDIPacket(bytes, blePort) {
  * count as OS touch/keyboard activity).
  */
 async function requestScreenWakeLock() {
+  // Never compete with an active Web Bluetooth chooser or GATT connection handshake
+  if (state.isConnectingBLE || state.wakeLockPending) {
+    return;
+  }
   if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') {
     return;
   }
   if (state.wakeLockSentinel && !state.wakeLockSentinel.released) {
     return;
   }
+
+  state.wakeLockPending = true;
   try {
     const sentinel = await navigator.wakeLock.request('screen');
     state.wakeLockSentinel = sentinel;
@@ -995,24 +1147,34 @@ async function requestScreenWakeLock() {
       }
     });
   } catch (_) {
-    // Ignore if blocked by low-power mode or awaiting initial user gesture
+    // Ignore if blocked by battery saver or awaiting initial user gesture
+  } finally {
+    state.wakeLockPending = false;
   }
 }
 
 function initScreenWakeLock() {
   requestScreenWakeLock();
 
-  // Browsers automatically release screen wake locks when a tab is backgrounded
-  // or the screen is locked; re-acquire immediately when visible again.
+  // Re-acquire when tab returns to foreground (unless BLE chooser is currently active)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      requestScreenWakeLock();
+    if (document.visibilityState === 'visible' && !state.isConnectingBLE) {
+      setTimeout(() => requestScreenWakeLock(), 300);
     }
   });
 
-  // Also ensure wake lock is acquired on any touch, click, or key interaction
-  document.addEventListener('pointerdown', () => requestScreenWakeLock(), { passive: true });
-  document.addEventListener('keydown', () => requestScreenWakeLock(), { passive: true });
+  // Ensure wake lock on general UI interactions, excluding the BLE pairing button
+  // so tapping "Pair Bluetooth MIDI" never fires concurrent browser-process IPC.
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.target && e.target.closest && e.target.closest('#btn-ble-midi')) {
+        return;
+      }
+      requestScreenWakeLock();
+    },
+    { passive: true }
+  );
 }
 
 /**
@@ -1128,16 +1290,30 @@ document.addEventListener('DOMContentLoaded', () => {
       togglePianoBtn.textContent = collapsed ? 'Show Keys' : 'Hide Keys';
       togglePianoBtn.setAttribute('aria-expanded', String(!collapsed));
       if (!collapsed) {
-        updatePianoRangeIndicators();
+        updatePianoRangeIndicators(true);
       }
     });
   }
 
   window.addEventListener('resize', () => {
-    updatePianoRangeIndicators();
+    updatePianoRangeIndicators(true);
   });
 
-  // Start first flashcard & initialize Web MIDI
+  // Start first flashcard
   nextFlashcard();
-  initWebMIDI();
+
+  // On Android, skip auto-initializing navigator.requestMIDIAccess() on load because
+  // Android's native MidiManager contends with Web Bluetooth GATT connections and
+  // causes a permission error banner; desktop browsers still auto-init Web MIDI.
+  const isAndroid = /android/i.test(navigator.userAgent || '');
+  if (isAndroid) {
+    const badge = document.getElementById('midi-status-badge');
+    const statusText = document.getElementById('midi-status-text');
+    if (badge) badge.dataset.status = 'disconnected';
+    if (statusText) {
+      statusText.textContent = 'Tap "Pair Bluetooth MIDI" to connect your Roland FP-30X';
+    }
+  } else {
+    initWebMIDI();
+  }
 });
